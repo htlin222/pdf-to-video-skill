@@ -1,0 +1,113 @@
+name: PDF motion video
+on:
+  workflow_dispatch:
+    inputs:
+      request:
+        description: "Checked-in request JSON path"
+        default: requests/render.json
+        type: string
+      demo:
+        description: "Run the synthetic two-page smoke test"
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      repository: ${{ steps.plan.outputs.repository }}
+      ref: ${{ steps.plan.outputs.ref }}
+      tag: ${{ steps.plan.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: plan
+        env:
+          REQUEST: ${{ inputs.request }}
+          DEMO: ${{ inputs.demo }}
+        run: |
+          if [[ "$DEMO" == true ]]; then
+            echo 'matrix=[0]' >> "$GITHUB_OUTPUT"
+          else
+            python3 scripts/plan.py "$REQUEST"
+          fi
+
+  compute:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      max-parallel: 20
+      matrix:
+        shard: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        if: ${{ !inputs.demo }}
+        with:
+          repository: ${{ needs.plan.outputs.repository }}
+          ref: ${{ needs.plan.outputs.ref }}
+          ssh-key: ${{ secrets.PDF_VIDEO_INPUT_KEY }}
+          persist-credentials: false
+          path: private-inputs
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg fonts-noto-cjk
+          python -m pip install 'pymupdf==1.28.0' 'Pillow==12.3.0' 'numpy<3' 'edge-tts>=7,<8'
+      - name: Render one PDF
+        env:
+          REQUEST: ${{ inputs.request }}
+          DEMO: ${{ inputs.demo }}
+          SHARD: ${{ matrix.shard }}
+        run: |
+          if [[ "$DEMO" == true ]]; then
+            python scripts/demo.py "$RUNNER_TEMP/pdf-inputs"
+            REQUEST="$RUNNER_TEMP/pdf-inputs/request.json"
+          else
+            mv private-inputs "$RUNNER_TEMP/pdf-inputs"
+          fi
+          python scripts/sound.py 0 1 "$RUNNER_TEMP/sfx"
+          python scripts/render.py "$SHARD" out --request "$REQUEST" --inputs "$RUNNER_TEMP/pdf-inputs" --sfx "$RUNNER_TEMP/sfx"
+          if [[ "$DEMO" == true ]]; then python scripts/verify.py out "$REQUEST"; fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pdf-video-${{ matrix.shard }}
+          path: out/
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+
+  collect:
+    if: ${{ !inputs.demo }}
+    needs: [plan, compute]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      REQUEST: ${{ inputs.request }}
+      TAG: ${{ needs.plan.outputs.tag }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: pdf-video-*
+          path: dist
+          merge-multiple: true
+      - name: Verify page and audio coverage
+        run: |
+          command -v ffprobe || { sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg; }
+          python3 scripts/verify.py dist "$REQUEST"
+      - name: Publish requested release
+        if: ${{ env.TAG != '' }}
+        run: |
+          gh release create "$TAG" dist/* --target "$GITHUB_SHA" \
+            --title "PDF motion walkthroughs" --notes "Validated motion films and page timelines." --prerelease
