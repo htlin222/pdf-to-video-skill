@@ -26,7 +26,7 @@ Commit a request configuration to the compute repo. The configuration contains f
 }
 ```
 
-A notes file is a JSON array. The page index starts at 1. Focus rectangles use normalized left, top, right and bottom in the visual orientation of the PDF. When there is no authored focus list, the renderer derives a geometric reading order from the page and uses the supplied summary, or a neutral reading prompt.
+A notes file is a JSON array. The page index starts at 1. Focus rectangles use normalized left, top, right and bottom in the visual orientation of the PDF. When there is no authored focus list, the renderer derives a geometric reading order from the page and uses the supplied summary, or a neutral reading prompt. Scanned pages without text are swept by quadrant.
 
 ```json
 [

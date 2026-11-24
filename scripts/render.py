@@ -156,7 +156,14 @@ def render_page(timeline, page, page_number, total, title, stamp, detail, narrat
     source = Image.frombytes("RGB", (image.width, image.height), image.samples)
     entire = page.rect
     content = blocks_for_region(page)
-    regions = division(entire, content)
+    if content:
+        regions = division(entire, content)
+    else:
+        # Scanned pages may provide no text boxes. Sweep all four quadrants.
+        mid_x, mid_y = entire.width / 2, entire.height / 2
+        regions = [fitz.Rect(x0, y0, x1, y1)
+                   for y0, y1 in ((0, mid_y), (mid_y, entire.height))
+                   for x0, x1 in ((0, mid_x), (mid_x, entire.width))]
     if len(regions) == 1 and content:
         regions = [fitz.Rect().include_rect(content[0])]
         for box in content[1:]:

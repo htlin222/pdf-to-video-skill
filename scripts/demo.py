@@ -16,6 +16,9 @@ with fitz.open() as doc:
         for x, label in ((81, "Input and conditions"), (433, "Result and checks")):
             for line in range(6):
                 page.insert_text((x, 160 + line * 66), f"{label}: example {line + 1}", fontsize=17)
+    scan = doc[1].get_pixmap(matrix=fitz.Matrix(2, 2))
+    doc.delete_page(1)
+    doc.new_page(width=792, height=612).insert_image(fitz.Rect(0, 0, 792, 612), pixmap=scan)
     doc.save(root / "demo.pdf")
 (root / "notes.json").write_text(json.dumps([{
     "page": 1, "heading": "讀懂兩個區塊", "spoken_title": "文件動態導讀",
